@@ -1,0 +1,296 @@
+---
+title: "Spatiotemporal Analysis in R"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+Andre Bertoncini (andre.bertoncini@usask.ca)
+
+02/09/2018 - University of Saskatchewan, Saskatoon
+
+## Terrain Analysis
+
+loading libraries
+
+```{r}
+library(raster)
+library(rgeos)
+```
+
+
+Ploting a raster
+
+```{r}
+setwd("C:/Users/alb818/Dropbox/DATA/R_SPATIAL")
+
+SRTM <- raster("SRTM_MOSAIC_NOVOID.tif")
+
+plot(SRTM)
+```
+
+Calculate slope
+
+```{r}
+slope <- terrain(SRTM, opt = "slope", unit = "radians")
+
+plot(slope)
+```
+
+Calculate aspect
+
+```{r}
+aspect <- terrain(SRTM, opt = "aspect", unit = "radians")
+
+plot(aspect)
+```
+
+Calculate hillshade for today at noon
+
+```{r}
+hillshd <- hillShade(slope, aspect, angle = 21.3, direction = 202.8, normalize = T)
+
+plot(hillshd)
+```
+
+Loading and ploting a shapefile over a raster
+
+```{r}
+BowRiver_atCochrane <- shapefile("BowRiver_atCochraneWGS84.shp")
+
+plot(SRTM)
+plot(BowRiver_atCochrane, add = T, bg = "transparent", border = "black")
+```
+
+Croping a raster using the shapefile extent
+
+```{r}
+AOI <- extent(BowRiver_atCochrane)
+
+SRTM_BowBasin <- crop(SRTM, AOI)
+
+plot(SRTM_BowBasin)
+plot(BowRiver_atCochrane, add = T, bg = "transparent", border = "black")
+```
+
+masking a raster using a shapefile (same as clipping)
+
+```{r}
+SRTM_BowBasin_mask <- mask(SRTM_BowBasin, BowRiver_atCochrane)
+
+plot(SRTM_BowBasin_mask)
+plot(BowRiver_atCochrane, add = T, bg = "transparent", border = "black")
+```
+
+Create HRUs based on aspect (reclassify)
+
+![Spatial Filtering (Canada Centre for Remote Sensing, 2015)](Filtering.jpg)
+
+
+```{r}
+MarmotBasin <- shapefile("Marmot_Basin2.shp")
+
+aspect_filter <- focal(aspect, w=matrix(1/121,nrow=11,ncol=11))
+
+plot(aspect_filter)
+
+Marmot_Aspect <- crop(aspect_filter, MarmotBasin)
+
+plot(Marmot_Aspect)
+plot(MarmotBasin, add = T, bg = "transparent")
+
+B <- matrix(c(0, 2, 4, 6, 2, 4, 6, 7, 0, 1, 2, 3), nr = 4, nc = 3)
+
+reclass_aspect <- reclassify(Marmot_Aspect, B)
+
+plot(reclass_aspect)
+plot(MarmotBasin, add = T, bg = "transparent")
+
+reclass_aspect_mask <- mask(reclass_aspect, MarmotBasin)
+
+HRUs <- rasterToPolygons(reclass_aspect_mask, dissolve = TRUE)
+plot(reclass_aspect)
+plot(HRUs, add = T, bg = "transparent")
+```
+
+Extracting slope values from HRUs
+
+```{r}
+HRUs_slope <- as.matrix(extract(slope, HRUs))
+
+HRU1 <- mean(HRUs_slope[[1]])*57.2958
+HRU2 <- mean(HRUs_slope[[2]])*57.2958
+HRU3 <- mean(HRUs_slope[[3]])*57.2958
+
+print(HRU1)
+print(HRU2)
+print(HRU3)
+```
+
+## Optical Remote Sensing
+
+Loading Sentinel 2A bands
+
+![Histogram Streching (CCRS, 2015)](Streching.jpg)
+
+```{r}
+SA2_list <- list.files(path = getwd(), pattern = "S2A_20171106_B.*.tif$")
+
+blue <- raster(SA2_list[5])
+green <- raster(SA2_list[6])
+red <- raster(SA2_list[7])
+NIR <- raster(SA2_list[11])
+SWIR_1610nm <- raster(SA2_list[3])
+
+blue <- crop(blue, AOI)/77.53
+green <- crop(green, AOI)/78.31
+red <- crop(red, AOI)/90.45
+
+RGB_data <- stack(blue, green, red)
+
+plotRGB(RGB_data, 3, 2, 1, stretch = "hist")
+```
+
+Zoom in some extent
+
+```{r}
+ext <- extent(-115.8905, -115.8559, 50.9709, 50.9914)
+
+plotRGB(RGB_data, 3, 2, 1, stretch = "hist", ext = ext)
+```
+
+Calculate NDSI (Dietz et al., 2011)
+
+![Spatial Resampling (CCRS, 2015)](Resample.jpg)
+
+```{r}
+green <- raster(SA2_list[6])
+TOA_green <- green*0.00001
+
+TOA_SWIR <- SWIR_1610nm*0.00001
+
+TOA_green <- resample(TOA_green, TOA_SWIR)
+
+TOA_green[TOA_green < 0.05] <- NA
+
+NDSI <- (TOA_green - TOA_SWIR)/(TOA_green + TOA_SWIR)
+
+plot(NDSI, ext = ext)
+
+plot(NDSI, ext = ext, col = rev(topo.colors(20)))
+```
+
+Make your own colour palette
+
+```{r}
+breakpoints <- c(0.6, 0.7, 0.8, 1)
+colors <- c("lightblue", "blue", "blue3", "blueviolet")
+
+plot(NDSI, ext = ext, col = colors, breaks = breakpoints)
+```
+
+## Spatiotemporal Analysis
+
+Loading and ploting monthly (2017) precipitation from GPM/IMERG
+
+```{r}
+GPM_list <- list.files(path = getwd(), pattern = "3B-MO-L.GIS.IMERG.*.tif$")
+
+GPM_2017 <- stack(GPM_list)
+
+GPM_BowBasin <- crop(GPM_2017, AOI)
+
+fun <- function() {
+  plot(BowRiver_atCochrane, add = T, bg = "transparent")
+}
+
+plot(GPM_BowBasin, addfun = fun)
+```
+
+Extracting spatial statistics from a basin
+
+```{r}
+GPM_BowBasin_mask <- mask(GPM_BowBasin, BowRiver_atCochrane)
+
+plot(GPM_BowBasin_mask)
+
+GPM_mean <- cellStats(GPM_BowBasin_mask, stat = "mean")
+
+GPM_Q95 <- quantile(GPM_BowBasin_mask, 0.95)
+GPM_Q05 <- quantile(GPM_BowBasin_mask, 0.05)
+
+months <- 1:12
+
+plot(months, GPM_Q95, type = "l", col = "blue", ylab = "Precipitation [mm]")
+lines(months, GPM_Q05, col = "red")
+lines(months, GPM_mean, col = "black")
+legend("topleft", legend = c("Q95", "Q05", "mean"), 
+       col = c("blue", "red", "black"), lty = c(1,1,1))
+```
+
+Extracting values from XY points from image time series
+
+```{r}
+X <- c(-114.75, -116.45, -115.24)
+Y <- c(51.24, 51.64, 50.64)
+
+points <- data.frame(X, Y)
+
+spt_points <- SpatialPoints(points)
+
+points_precip <- extract(GPM_BowBasin_mask, spt_points)
+
+plot(months, points_precip[1,], type = "l", col = "blue", ylab = "Precipitation [mm]")
+lines(months, points_precip[2,], col = "red")
+lines(months, points_precip[3,], col = "black")
+legend("topleft", legend = c("outlet", "headwater N", "headwater S"), 
+       col = c("blue", "red", "black"), lty = c(1,1,1))
+```
+
+Spatial histogram
+
+```{r}
+hist(GPM_BowBasin_mask, col = "blue")
+```
+
+Spatial boxplots
+
+```{r}
+boxplot(GPM_BowBasin_mask, col = "blue", ylab = "Precipitation [mm]", xaxt = "n")
+axis(months)
+```
+
+Temporal statistics
+
+```{r}
+annual_max <- max(GPM_BowBasin_mask)
+
+plot(annual_max)
+```
+
+Principal Component Analysis
+
+![Reducing Dimensionality (CCRS, 2015)](PCA.jpg)
+
+```{r}
+sr <- sampleRandom(GPM_BowBasin_mask, 100)
+PCA <- prcomp(sr)
+
+plot(PCA$sdev)
+
+print(sum(PCA$sdev[1:3]))
+
+x <- predict(GPM_BowBasin_mask, PCA, index=1:3)
+plot(x)
+```
+
+## References & Useful Links
+
+Dietz, A. J., Kuenzer, C., & Gessner, U. (2011). Remote sensing of snow - a review of available methods. International Journal of Remote Sensing, 33(December), 37-41.
+
+https://cran.r-project.org/web/packages/raster/raster.pdf - raster package documentation
+
+http://www.rspatial.org/ - spatial data tutorial in R
+
+http://www.nrcan.gc.ca/earth-sciences/geomatics/satellite-imagery-air-photos/satellite-imagery-products/educational-resources/9309 - background on Remote Sensing
+
