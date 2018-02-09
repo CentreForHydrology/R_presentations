@@ -1,4 +1,6 @@
 # R_presentations
-This folder contains R presentation files
+This repository contains presentations on R
 
-R_spatial_Bertoncini.zip - Spatialtemporal Analysis in R by Andre Bertoncini
+Each presentation is in a separate directory
+
+R_spatial_Bertoncini - Spatialtemporal Analysis in R by Andre Bertoncini
